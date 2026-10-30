@@ -7,6 +7,8 @@ import time
 
 async def main():
     loop = asyncio.get_running_loop()
+    # Debug mode (PYTHONASYNCIODEBUG=1, -X dev) raises instead of stalling; see below.
+    loop.set_debug(False)
 
     # The trap: a library thread schedules a callback with call_soon.
     done = asyncio.Event()
@@ -18,7 +20,7 @@ async def main():
     loop.call_later(0.5, lambda: None)  # Some unrelated timer wakes the loop later.
     threading.Thread(target=library_callback).start()
     start = time.monotonic()
-    await done.wait()
+    await asyncio.wait_for(done.wait(), timeout=5)
     stalled = time.monotonic() - start
     print(f"call_soon from a thread took {stalled:.2f}s")  # ~0.50s, not ~0.10s
     assert stalled >= 0.4
@@ -48,7 +50,7 @@ async def main():
 
     threading.Thread(target=library_callback_fixed).start()
     start = time.monotonic()
-    await done.wait()
+    await asyncio.wait_for(done.wait(), timeout=5)
     assert time.monotonic() - start < 0.4
 
 

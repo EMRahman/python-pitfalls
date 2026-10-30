@@ -23,6 +23,8 @@ jobs:
           for f in examples/*.py; do
             echo "::group::$f"
             python "$f" || { echo "::error file=$f::example failed"; status=1; }
+            # Development mode enables asyncio debug checks, which change behavior.
+            python -X dev "$f" > /dev/null || { echo "::error file=$f::example failed under -X dev"; status=1; }
             echo "::endgroup::"
           done
           exit $status

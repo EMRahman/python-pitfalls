@@ -68,7 +68,9 @@ async def checkout(order):
 
 At best, Python prints `RuntimeWarning: coroutine 'save' was never awaited` when the coroutine is garbage-collected, which is easy to miss in production logs.
 
-**The fix:** `await save(order)`. Type checkers catch this reliably (pyright's `reportUnusedCoroutine`, mypy's `unused-coroutine`), and running tests with `-W error::RuntimeWarning` turns the warning into a failure.
+**The fix:** `await save(order)`. Type checkers catch this reliably (pyright's `reportUnusedCoroutine`, mypy's `unused-coroutine`).
+
+Don't rely on `-W error::RuntimeWarning` alone. The warning is raised while the coroutine is being garbage-collected, where an exception can't propagate. Python prints it as `Exception ignored in: <coroutine ...>` and carries on with exit status 0. Under pytest, the warning only fails the test with both filters together, `-W error::RuntimeWarning -W error::pytest.PytestUnraisableExceptionWarning`, or with `filterwarnings = ["error"]` in your pytest config.
 
 [Example](../examples/21_asyncio_forgotten_await.py)
 
