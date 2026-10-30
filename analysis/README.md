@@ -6,7 +6,7 @@ Scripts behind [docs/dependency-risk.md](../docs/dependency-risk.md). They downl
 
 ## Reproduce
 
-Downloaded data is untrusted, so keep it in its own directory and run the scripts from here with `python -I`. Network scripts need Python 3.11+ with working CA certificates. `fetch_yanked.py` also needs `packaging`.
+Downloaded data is untrusted, so keep it in its own directory and run the scripts from here with `python -I`. Network scripts need Python 3.11+ with working CA certificates. `fetch_yanked.py` also needs `packaging`, and `charts.py` needs `matplotlib`.
 
 ```sh
 DATA=/tmp/pypi-risk-data
@@ -22,6 +22,7 @@ python -I fetch_yanked.py $DATA 1000    # Yanked releases from PyPI (needs packa
 python -I analyze.py $DATA              # Reach x vulnerabilities x yanks
 python -I fetch_scorecard.py $DATA      # OpenSSF Scorecard for the hidden layer
 python -I report.py $DATA               # Every table in the report
+python -I charts.py $DATA ../docs/img   # Light and dark SVG charts (needs matplotlib)
 ```
 
 The fetch scripts cache one JSON file per package, so they can be rerun after a failure. Expect about five minutes in total. Results will drift as OSV, PyPI and deps.dev update.
@@ -34,3 +35,4 @@ The fetch scripts cache one JSON file per package, so they can be rerun after a 
 | `analyze.py` | `joined.json`: per-package reach, direct and indirect counts, advisories, yanks |
 | `fetch_scorecard.py` | `scorecard/*.json`: Scorecard for packages with reach ≥ 20 and mostly indirect use |
 | `report.py` | Prints the hidden-layer, burstiness, CWE, yanked, malicious-package, monthly and Scorecard tables |
+| `charts.py` | `docs/img/*-{light,dark}.svg`: advisories per year, reach vs advisories, weakness mix. Colors are a palette validated for color-vision deficiency in both themes |

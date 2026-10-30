@@ -6,13 +6,29 @@
 
 Examining the gap between Python's readable interfaces and the underlying complexity, implicit state, and unexpected behavior they can conceal.
 
-A catalog of 52 Python gotchas, traps and surprising behaviors, from beginner-level surprises to asyncio, threading, CPython internals and data-engineering bugs. Each comes with a minimal reproduction, an explanation of *why* it happens, and the fix.
+A catalog of 59 Python gotchas, traps and surprising behaviors, from beginner-level surprises to asyncio, threading, CPython internals, data-engineering bugs and security vulnerabilities. Each comes with a minimal reproduction, an explanation of *why* it happens, the fix, and, where one exists, the real-world bug or CVE it caused.
 
 Python's syntax prioritizes readability, but readable code does not always make runtime behavior predictable. Some pitfalls arise from implicit state, others from surprising semantics or abstractions that leak underlying details. John Ousterhout's *A Philosophy of Software Design* calls a particularly troublesome symptom of complexity *unknown unknowns*: behavior you cannot predict from the interface in front of you. When the language's mechanics don't match its readable syntax, developers may discover those differences only through runtime bugs.
 
-Here is a collection of Python pitfalls developers often discover the hard way.
+Here is a collection of Python pitfalls developers often discover the hard way, and the evidence that they don't stay in tutorials.
 
-> Every snippet here and in [`docs/`](docs/) has a runnable, self-checking twin in [`examples/`](examples/). CI runs them on CPython 3.10 to 3.14, so the outputs shown here are verified, not remembered.
+> Every pitfall except two security entries has a runnable, self-checking example in [`examples/`](examples/). CI runs them on CPython 3.10 to 3.14, so the outputs shown here are verified, not remembered.
+
+## How the complexity shows up in production
+
+Each row is a kind of hidden complexity, a pitfall that demonstrates the mechanism, and what it has caused in real code. Advisory counts are unique PyPI vulnerabilities published since 2023, from the [OSV](https://osv.dev) database ([method](docs/dependency-risk.md#method-and-limitations)).
+
+| Hidden complexity | Pitfalls | PyPI advisories since 2023 | Real-world cases |
+|---|---|---:|---|
+| A path join silently discards your prefix | [#53](docs/security.md#53-ospathjoin-discards-your-prefix), [#54](docs/security.md#54-tarfile-trusted-member-paths-until-python-314) | 507 (path traversal, the #1 weakness) | `tarfile` CVE-2007-4559, open for 15 years |
+| Parsing cost grows with the attacker's input | [#56](docs/security.md#56-nested-quantifiers-backtrack-exponentially), [#57](docs/security.md#57-decompression-bombs), [#42](docs/interpreter.md#42-strint-fails-above-4300-digits) | 549 (denial of service) | `urllib3` CVE-2021-33503, `idna` CVE-2024-3651, CPython CVE-2020-10735 |
+| Loading data runs code | [#58](docs/security.md#58-loading-data-can-run-code) | 210 (deserialization) | `torch.load` CVE-2025-32434; 58 bypasses of `picklescan` |
+| A convenience hides a protocol decision | [#55](docs/security.md#55-redirects-forward-credentials-to-another-host) | 60 (redirect-related leaks) | `requests` CVE-2018-18074, `urllib3` CVE-2023-43804 |
+| One parameter, two meanings | [#59](docs/security.md#59-one-key-parameter-two-meanings) | 41 (signature verification) | PyJWT: 15 key or algorithm advisories since 2023 |
+| Hash values change per process | [#43](docs/data-systems.md#43-hash-changes-between-processes) | | CPython CVE-2012-1150, the reason `hash()` is randomized |
+| Wall-clock vs elapsed time | [#48](docs/data-systems.md#48-aware-datetime-arithmetic-is-wall-clock-arithmetic), [#49](docs/data-systems.md#49-a-utc-offset-is-not-a-time-zone) | | Home Assistant: [alert loop](https://github.com/home-assistant/core/pull/188537), [backups an hour off](https://github.com/home-assistant/core/pull/188836) |
+| The event loop is shared by everything | [#20](docs/concurrency.md#20-fire-and-forget-tasks-get-garbage-collected), [#22](docs/concurrency.md#22-blocking-calls-freeze-the-event-loop), [#24](docs/concurrency.md#24-loop-methods-arent-thread-safe) | | Home Assistant's [guard rails](#in-the-wild-home-assistant) and [Hikvision fix](https://github.com/home-assistant/core/pull/160027) |
+| Code you never chose | [Dependency risk](docs/dependency-risk.md) | | `urllib3` and `certifi` reach 145 and 144 of the top 1,000 packages, 86–87% indirectly |
 
 ## Contents
 
@@ -54,6 +70,7 @@ Here is a collection of Python pitfalls developers often discover the hard way.
 | [Object model & imports](docs/object-model.md) | 31–37 | Properties vs `__getattr__`, `@lru_cache` leaks, `__eq__` vs `__hash__`, `__exit__` swallowing errors, weak refs to bound methods, `mock.patch` targets, double-imported `__main__` |
 | [Interpreter internals](docs/interpreter.md) | 38–42 | `python -O` stripping asserts, class-body comprehension scope, `locals()` writes, `id()` reuse, the 4300-digit `int`/`str` limit |
 | [Data systems: time, numbers, bytes](docs/data-systems.md) | 43–52 | `hash()` sharding, NaN in containers, nanosecond timestamps in floats and `datetime`, float prices, DST arithmetic, fixed UTC offsets, `utcnow()`, `struct` alignment, non-standard JSON |
+| [Security: where complexity becomes a CVE](docs/security.md) | 53–59 | `os.path.join` with absolute paths, `tarfile` extraction, credentials forwarded on redirect, regex backtracking, decompression bombs, unsafe deserialization, signing-key confusion |
 
 See also [In the wild](#in-the-wild-home-assistant) for how a large production codebase hits and guards against these.
 
@@ -61,7 +78,7 @@ See also [In the wild](#in-the-wild-home-assistant) for how a large production c
 
 | Page | Covers |
 |------|--------|
-| [Dependency risk](docs/dependency-risk.md) | Which PyPI dependencies cause the most vulnerabilities and bugs: 7,032 OSV advisories joined with the dependency graphs of the top 1,000 packages, yanked releases, OpenSSF Scorecard and typosquatting data |
+| [Complexity in the wild](docs/dependency-risk.md) | What Python's vulnerability data shows, organized by mechanism: 7,032 OSV advisories joined with the dependency graphs of the top 1,000 packages, yanked releases, OpenSSF Scorecard and typosquatting data, with charts |
 
 ---
 
