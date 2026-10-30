@@ -1,0 +1,28 @@
+name: Verify examples
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Run every example
+        run: |
+          status=0
+          for f in examples/*.py; do
+            echo "::group::$f"
+            python "$f" || { echo "::error file=$f::example failed"; status=1; }
+            echo "::endgroup::"
+          done
+          exit $status
