@@ -19,6 +19,7 @@ Found a Python behavior that surprised you? Please add it.
    for f in examples/*.py; do python "$f" || echo "FAILED: $f"; done
    ```
 
-4. Open a pull request. CI runs the examples on CPython 3.10 to 3.14.
+4. If there's a documented real-world bug, CVE or fix caused by the pitfall, add an **In the wild** paragraph linking to it.
+5. Open a pull request. CI runs the examples on CPython 3.10 to 3.14.
 
 If behavior differs between Python versions, say which versions in the README and guard the example with `sys.version_info`.

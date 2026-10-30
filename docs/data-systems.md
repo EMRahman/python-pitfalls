@@ -41,6 +41,8 @@ It also makes `set` iteration order of strings differ between runs, which makes 
 
 **The fix:** Use a stable hash for anything that crosses a process boundary or gets persisted: `zlib.crc32(key.encode())`, or `hashlib.blake2b(key.encode(), digest_size=8)` for a better distribution. `PYTHONHASHSEED=0` disables randomization, but it's a workaround, not a design.
 
+**In the wild:** Randomization exists because of CVE-2012-1150. Attackers could send request parameters chosen to collide in a dict, turning each insert into a linear scan and letting a single HTTP request occupy a server's CPU. Python added randomization in 2.6.8, 2.7.3 and 3.2.3 behind `-R`, and turned it on by default in 3.3.
+
 [Example](../examples/43_hash_randomization_sharding.py)
 
 ### 44. NaN Breaks `in`, `max()` and `sorted()`
