@@ -57,6 +57,12 @@ Here is a collection of Python pitfalls developers often discover the hard way.
 
 See also [In the wild](#in-the-wild-home-assistant) for how a large production codebase hits and guards against these.
 
+### Part III: Research
+
+| Page | Covers |
+|------|--------|
+| [Dependency risk](docs/dependency-risk.md) | Which PyPI dependencies cause the most vulnerabilities and bugs: 7,032 OSV advisories joined with the dependency graphs of the top 1,000 packages, yanked releases, OpenSSF Scorecard and typosquatting data |
+
 ---
 
 ## Iterators & laziness
