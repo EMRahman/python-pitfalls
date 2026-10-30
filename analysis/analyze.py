@@ -6,7 +6,7 @@ norm = lambda n: re.sub(r"[-_.]+", "-", n).lower()
 top = json.load(open(f"{data}/top/top30d.json"))["rows"]
 downloads = {norm(r["project"]): r["download_count"] for r in top}
 rank = {norm(r["project"]): i + 1 for i, r in enumerate(top)}
-roots = [norm(r["project"]) for r in top[:1000]]
+roots = {norm(r["project"]) for r in top[:1000]}
 
 # Reach: how many top-1000 packages pull each package in, directly or only indirectly.
 direct, indirect, nodes_per_root = collections.defaultdict(set), collections.defaultdict(set), []
@@ -15,6 +15,8 @@ for f in glob.glob(f"{data}/deps/*.json"):
     if "graph" not in d:
         continue
     root = norm(os.path.basename(f)[:-5])
+    if root not in roots:  # Ignore graphs cached for packages no longer in the top 1,000.
+        continue
     nodes = d["graph"]["nodes"]
     nodes_per_root.append(len(nodes) - 1)
     for node in nodes:

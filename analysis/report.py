@@ -6,6 +6,7 @@ vulns = json.load(open(f"{d}/vulns.json"))
 V, MAL = vulns["vulns"], vulns["malicious"]
 top = json.load(open(f"{d}/top/top30d.json"))["rows"]
 top_names = [norm(r["project"]) for r in top[:1000]]
+top_set = set(top_names)
 
 hidden = [r for r in rows.values() if r["reach"] >= 10 and r["only_indirect"] / r["reach"] >= 0.5]
 print("== HIDDEN LAYER: reach>=10 and >=50% of reach is indirect-only:", len(hidden))
@@ -48,7 +49,7 @@ print("\n== YANKED RELEASES, top 1000 packages")
 ys = []
 for f in glob.glob(f"{d}/simple/*.json"):
     y = json.load(open(f)); p = norm(os.path.basename(f)[:-5])
-    if y.get("n_versions"): ys.append((p, len(y["yanked"]), y["n_versions"], y["reasons"]))
+    if p in top_set and y.get("n_versions"): ys.append((p, len(y["yanked"]), y["n_versions"], y["reasons"]))
 print("  packages with >=1 yanked release:", sum(1 for x in ys if x[1]), "of", len(ys), "| total yanked:", sum(x[1] for x in ys))
 for p, n, tot, reasons in sorted(ys, key=lambda x: -x[1])[:15]:
     r = rows.get(p, {}); sample = next(iter(reasons.values()), "")[:70]
@@ -88,6 +89,7 @@ for label, pop in [("dependencies (reach>=10)", deps), ("hidden layer", hid), ("
     dos = sum(1 for v in vs if DOS & set(v["cwes"]))
     print(f"  {label}: {len(vs)} vulns with CWE since 2023, DoS-class {dos} ({100 * dos / len(vs):.0f}%)")
 sc = {os.path.basename(f)[:-5]: json.load(open(f)) for f in glob.glob(f"{d}/scorecard/*.json")}
-with_v = [s["score"] for p, s in sc.items() if s.get("score") is not None and rows[p]["vulns"]]
-without = [s["score"] for p, s in sc.items() if s.get("score") is not None and not rows[p]["vulns"]]
+sc = {p: s for p, s in sc.items() if p in rows and s.get("score") is not None}
+with_v = [s["score"] for p, s in sc.items() if rows[p]["vulns"]]
+without = [s["score"] for p, s in sc.items() if not rows[p]["vulns"]]
 print(f"\n== SCORECARD mean: with advisories {statistics.mean(with_v):.1f} (n={len(with_v)}), without {statistics.mean(without):.1f} (n={len(without)})")

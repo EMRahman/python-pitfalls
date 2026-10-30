@@ -14,9 +14,17 @@ def version_of(fn):
     except (InvalidSdistFilename, InvalidWheelFilename, Exception):
         return None
 
+def cached(path):
+    """A cache hit only counts if it holds data; failed fetches are retried."""
+    try:
+        return "error" not in json.load(open(path))
+    except (OSError, ValueError):
+        return False
+
+
 def fetch(name):
     out = f"{data}/simple/{name}.json"
-    if os.path.exists(out):
+    if cached(out):
         return "cached"
     req = urllib.request.Request(f"https://pypi.org/simple/{name}/", headers={"Accept": "application/vnd.pypi.simple.v1+json"})
     try:
@@ -27,10 +35,13 @@ def fetch(name):
     versions, yanked, reasons = set(idx.get("versions", [])), {}, {}
     for f in idx["files"]:
         v = version_of(f["filename"])
-        if v and f.get("yanked"):
+        # PEP 691: `yanked` is false/absent, true, or a reason string. Any string
+        # (even an empty one) means yanked, so test against false, not truthiness.
+        flag = f.get("yanked", False)
+        if v and flag is not False and flag is not None:
             yanked[v] = True
-            if isinstance(f["yanked"], str):
-                reasons[v] = f["yanked"]
+            if isinstance(flag, str) and flag:
+                reasons[v] = flag
     json.dump({"n_versions": len(versions), "yanked": sorted(yanked), "reasons": reasons}, open(out, "w"))
     return "ok"
 

@@ -10,9 +10,17 @@ def get(url):
     with urllib.request.urlopen(url, timeout=60) as r:
         return json.load(r)
 
+def cached(path):
+    """A cache hit only counts if it holds data; failed fetches are retried."""
+    try:
+        return "error" not in json.load(open(path))
+    except (OSError, ValueError):
+        return False
+
+
 def fetch(name):
     out = f"{data}/deps/{name}.json"
-    if os.path.exists(out):
+    if cached(out):
         return "cached"
     try:
         pkg = get(API + urllib.parse.quote(name, safe=""))

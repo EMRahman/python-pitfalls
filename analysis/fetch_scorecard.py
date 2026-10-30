@@ -7,9 +7,16 @@ targets = [r for r in rows if r["reach"] >= 20 and r["only_indirect"] / r["reach
 q = lambda s: urllib.parse.quote(s, safe="")
 def get(u):
     with urllib.request.urlopen(u, timeout=60) as r: return json.load(r)
+def cached(path):
+    """A cache hit only counts if it holds data; failed fetches are retried."""
+    try:
+        return "error" not in json.load(open(path))
+    except (OSError, ValueError):
+        return False
+
 def fetch(r):
     p = r["pkg"]; out = f"{d}/scorecard/{p}.json"
-    if os.path.exists(out): return
+    if cached(out): return
     try:
         version = json.load(open(f"{d}/deps/{p}.json"))["version"] if os.path.exists(f"{d}/deps/{p}.json") else \
             next(v["versionKey"]["version"] for v in get(f"https://api.deps.dev/v3/systems/pypi/packages/{q(p)}")["versions"] if v.get("isDefault"))
