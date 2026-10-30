@@ -12,7 +12,7 @@ Found a Python behavior that surprised you? Please add it.
 ## Adding one
 
 1. Create `examples/NN_short_name.py`, numbered after the last example. Show the trap, `assert` the surprising result, then show and `assert` the fix. Follow the layout of the existing files.
-2. Add a section to `README.md` under the matching category, with **The Trap** snippet, a short **Why**, **The fix**, and a link to your example. Add a row to the Contents table.
+2. Add a section under the matching category: `README.md` for fundamentals, or the relevant page in `docs/` for advanced topics, with **The Trap** snippet, a short **Why**, **The fix**, and a link to your example. Add a row to the Contents table.
 3. Run every example locally:
 
    ```sh

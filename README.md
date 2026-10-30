@@ -4,15 +4,17 @@
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-A catalog of Python gotchas, traps and surprising behaviors, each with a minimal reproduction, an explanation of *why* it happens, and the fix.
+A catalog of 52 Python gotchas, traps and surprising behaviors, from beginner-level surprises to asyncio, threading, CPython internals and data-engineering bugs. Each comes with a minimal reproduction, an explanation of *why* it happens, and the fix.
 
 Python's syntax prioritizes readability, but a readable surface can hide complex, leaky internal state. John Ousterhout's *A Philosophy of Software Design* calls the worst symptom of complexity *unknown unknowns*: behavior you cannot predict from the interface in front of you. When the language's mechanics don't match its readable syntax, developers are forced to hold a mental model of the interpreter's state, and usually discover the truth through runtime bugs.
 
 Here is a log of the design traps developers learn the hard way.
 
-> Every snippet below has a runnable, self-checking twin in [`examples/`](examples/). CI runs them on CPython 3.10 to 3.14, so the outputs shown here are verified, not remembered.
+> Every snippet here and in [`docs/`](docs/) has a runnable, self-checking twin in [`examples/`](examples/). CI runs them on CPython 3.10 to 3.14, so the outputs shown here are verified, not remembered.
 
 ## Contents
+
+### Part I: Fundamentals
 
 | # | Pitfall | What you see | The fix |
 |---|---------|--------------|---------|
@@ -41,6 +43,17 @@ Here is a log of the design traps developers learn the hard way.
 | 17 | [`strip()` takes a character set](#17-strip-takes-a-set-of-characters-not-a-substring) | `"report.txt"` becomes `"repor"` | `removesuffix()` |
 | 18 | [Banker's rounding](#18-round-uses-bankers-rounding) | `round(2.5) == 2` | `Decimal` + `ROUND_HALF_UP` |
 | 19 | [`return` in `finally`](#19-return-in-finally-swallows-exceptions) | Exception vanishes | Never return from `finally` |
+
+### Part II: Advanced
+
+| Page | # | Covers |
+|------|---|--------|
+| [Concurrency: asyncio & threading](docs/concurrency.md) | 20–30 | Garbage-collected tasks, forgotten `await`, blocking the event loop, swallowed cancellation, cross-thread loop calls, non-atomic `+=`, vanishing thread exceptions, `Lock` re-entry, `threading.local` under asyncio, `fork()` deadlocks, daemon threads |
+| [Object model & imports](docs/object-model.md) | 31–37 | Properties vs `__getattr__`, `@lru_cache` leaks, `__eq__` vs `__hash__`, `__exit__` swallowing errors, weak refs to bound methods, `mock.patch` targets, double-imported `__main__` |
+| [Interpreter internals](docs/interpreter.md) | 38–42 | `python -O` stripping asserts, class-body comprehension scope, `locals()` writes, `id()` reuse, the 4300-digit `int`/`str` limit |
+| [Data systems: time, numbers, bytes](docs/data-systems.md) | 43–52 | `hash()` sharding, NaN in containers, nanosecond timestamps in floats and `datetime`, float prices, DST arithmetic, fixed UTC offsets, `utcnow()`, `struct` alignment, non-standard JSON |
+
+See also [In the wild](#in-the-wild-home-assistant) for how a large production codebase hits and guards against these.
 
 ---
 
@@ -204,6 +217,8 @@ print(bob.items) # Output: ['apple'] (Bob never added anything!)
 **Why:** `self.items` finds no instance attribute, falls back to the class attribute, and `.append()` mutates it in place. (Assignment such as `self.items = [...]` *would* create an instance attribute, which is why this trap is easy to miss.)
 
 **The fix:** Create per-instance state in `__init__`, or use a dataclass with `field(default_factory=list)`. Dataclasses refuse a bare `items: list = []` default for exactly this reason.
+
+**In the wild:** Home Assistant [removed class-level mutable defaults](https://github.com/home-assistant/core/pull/170119) from an integration after a reviewer spotted them. They hadn't caused a bug yet only because nothing mutated them.
 
 [Example](examples/06_shared_class_attributes.py)
 
@@ -483,6 +498,28 @@ print(save()) # Output: saved
 [Example](examples/19_return_in_finally.py)
 
 ---
+
+## In the wild: Home Assistant
+
+[Home Assistant Core](https://github.com/home-assistant/core) is one of the largest asyncio codebases in open source: thousands of integrations, written by different people, sharing a single event loop. Several pitfalls above show up in its recent bug fixes, and its core has guard rails built specifically against them.
+
+**Bugs fixed:**
+
+| Fix | Pitfall |
+|-----|---------|
+| [Alert notifications fired in a tight loop during the DST fall-back hour](https://github.com/home-assistant/core/pull/188537) | [#48](docs/data-systems.md#48-aware-datetime-arithmetic-is-wall-clock-arithmetic): `now() + delay` is wall-clock arithmetic |
+| [Automatic backups ran an hour off after every DST change](https://github.com/home-assistant/core/pull/188836) | [#49](docs/data-systems.md#49-a-utc-offset-is-not-a-time-zone): a parsed `+02:00` is not a time zone |
+| [Hikvision updated state from a library thread](https://github.com/home-assistant/core/pull/160027) | [#24](docs/concurrency.md#24-loop-methods-arent-thread-safe): loop APIs aren't thread-safe |
+| [Class-level mutable defaults in an integration](https://github.com/home-assistant/core/pull/170119) | [#6](#6-shared-mutable-class-attributes): shared class attributes |
+
+**Guard rails in core:**
+
+- **Task tracking.** `hass.async_create_task()` stores every task in a set and removes it on completion, so tasks can't be garbage-collected mid-flight ([#20](docs/concurrency.md#20-fire-and-forget-tasks-get-garbage-collected)).
+- **Blocking-call detection.** [`block_async_io.py`](https://github.com/home-assistant/core/blob/dev/homeassistant/block_async_io.py) wraps `time.sleep`, `open`, `os.listdir`, `importlib.import_module`, SSL certificate loading and more, and reports any call made from the event loop ([#22](docs/concurrency.md#22-blocking-calls-freeze-the-event-loop)).
+- **Thread checks.** `verify_event_loop_thread()` compares `threading.get_ident()` with the loop's thread and raises when a loop-only API is called from elsewhere ([#24](docs/concurrency.md#24-loop-methods-arent-thread-safe)).
+- **Linting.** The project [enabled 19 more flake8-bugbear rules](https://github.com/home-assistant/core/pull/170494) through ruff, covering mutable defaults, loop-variable shadowing and similar traps.
+
+The lesson generalizes: when a pitfall can't be designed away, make it fail loudly. Every guard rail above turns a silent, intermittent bug into an immediate error with a clear message.
 
 ## Running the examples
 
