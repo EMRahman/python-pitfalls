@@ -1,14 +1,16 @@
-# Python Pitfalls: Discovering Shallow Interfaces the Hard Way
+# Python Pitfalls: When Simple Code Hides Surprising Behavior
 
 [![Verify examples](https://github.com/EMRahman/python-pitfalls/actions/workflows/verify.yml/badge.svg)](https://github.com/EMRahman/python-pitfalls/actions/workflows/verify.yml)
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
+Examining the gap between Python's readable interfaces and the underlying complexity, implicit state, and unexpected behavior they can conceal.
+
 A catalog of 52 Python gotchas, traps and surprising behaviors, from beginner-level surprises to asyncio, threading, CPython internals and data-engineering bugs. Each comes with a minimal reproduction, an explanation of *why* it happens, and the fix.
 
-Python's syntax prioritizes readability, but a readable surface can hide complex, leaky internal state. John Ousterhout's *A Philosophy of Software Design* calls the worst symptom of complexity *unknown unknowns*: behavior you cannot predict from the interface in front of you. When the language's mechanics don't match its readable syntax, developers are forced to hold a mental model of the interpreter's state, and usually discover the truth through runtime bugs.
+Python's syntax prioritizes readability, but readable code does not always make runtime behavior predictable. Some pitfalls arise from implicit state, others from surprising semantics or abstractions that leak underlying details. John Ousterhout's *A Philosophy of Software Design* calls a particularly troublesome symptom of complexity *unknown unknowns*: behavior you cannot predict from the interface in front of you. When the language's mechanics don't match its readable syntax, developers may discover those differences only through runtime bugs.
 
-Here is a log of the design traps developers learn the hard way.
+Here is a collection of Python pitfalls developers often discover the hard way.
 
 > Every snippet here and in [`docs/`](docs/) has a runnable, self-checking twin in [`examples/`](examples/). CI runs them on CPython 3.10 to 3.14, so the outputs shown here are verified, not remembered.
 
