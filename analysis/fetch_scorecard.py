@@ -1,5 +1,5 @@
 """Fetch OpenSSF Scorecard data via deps.dev for hidden-layer packages."""
-import json, os, sys, urllib.parse, urllib.request
+import json, sys, urllib.parse, urllib.request
 from concurrent.futures import ThreadPoolExecutor
 d = sys.argv[1]
 rows = json.load(open(f"{d}/joined.json"))["rows"]
@@ -14,12 +14,19 @@ def cached(path):
     except (OSError, ValueError):
         return False
 
+def version_for(p):
+    """The version whose graph was analyzed, or the default if that fetch failed or never ran."""
+    try:
+        return json.load(open(f"{d}/deps/{p}.json"))["version"]
+    except (OSError, ValueError, KeyError):
+        pkg = get(f"https://api.deps.dev/v3/systems/pypi/packages/{q(p)}")
+        return next(v["versionKey"]["version"] for v in pkg["versions"] if v.get("isDefault"))
+
 def fetch(r):
     p = r["pkg"]; out = f"{d}/scorecard/{p}.json"
     if cached(out): return
     try:
-        version = json.load(open(f"{d}/deps/{p}.json"))["version"] if os.path.exists(f"{d}/deps/{p}.json") else \
-            next(v["versionKey"]["version"] for v in get(f"https://api.deps.dev/v3/systems/pypi/packages/{q(p)}")["versions"] if v.get("isDefault"))
+        version = version_for(p)
         ver = get(f"https://api.deps.dev/v3/systems/pypi/packages/{q(p)}/versions/{q(version)}")
         proj = next((x["projectKey"]["id"] for x in ver.get("relatedProjects", []) if x.get("relationType") == "SOURCE_REPO"), None)
         res = {"project": proj}
