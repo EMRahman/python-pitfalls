@@ -6,13 +6,13 @@
 
 Examining the gap between Python's readable interfaces and the underlying complexity, implicit state, and unexpected behavior they can conceal.
 
-A catalog of 59 Python gotchas, traps and surprising behaviors, from beginner-level surprises to asyncio, threading, CPython internals, data-engineering bugs and security vulnerabilities. Each comes with a minimal reproduction, an explanation of *why* it happens, the fix, and, where one exists, the real-world bug or CVE it caused.
+A catalog of 73 Python gotchas, traps and surprising behaviors, from beginner-level surprises to asyncio, threading, CPython internals, data-engineering bugs and security vulnerabilities. Each comes with a minimal reproduction, an explanation of *why* it happens, the fix, and, where one exists, the real-world bug or CVE it caused.
 
 Python's syntax prioritizes readability, but readable code does not always make runtime behavior predictable. Some pitfalls arise from implicit state, others from surprising semantics or abstractions that leak underlying details. John Ousterhout's *A Philosophy of Software Design* calls a particularly troublesome symptom of complexity *unknown unknowns*: behavior you cannot predict from the interface in front of you. When the language's mechanics don't match its readable syntax, developers may discover those differences only through runtime bugs.
 
 Here is a collection of Python pitfalls developers often discover the hard way, and the evidence that they don't stay in tutorials.
 
-> Every pitfall except two security entries has a runnable, self-checking example in [`examples/`](examples/). CI runs them on CPython 3.10 to 3.14, so the outputs shown here are verified, not remembered.
+> Every pitfall has a runnable, self-checking example in [`examples/`](examples/). CI runs them on CPython 3.10 to 3.14 (including free-threaded `3.13t` and `3.14t`), so the outputs shown here are verified, not remembered.
 
 ## How the complexity shows up in production
 
@@ -20,7 +20,7 @@ Each row is a kind of hidden complexity, a pitfall that demonstrates the mechani
 
 | Hidden complexity | Pitfalls | PyPI advisories since 2023 | Real-world cases |
 |---|---|---:|---|
-| A path join silently discards your prefix | [#53](docs/security.md#53-ospathjoin-discards-your-prefix), [#54](docs/security.md#54-tarfile-trusted-member-paths-until-python-314) | 507 (path traversal, the #1 weakness) | `tarfile` CVE-2007-4559, open for 15 years |
+| A path or URL join silently discards your prefix | [#53](docs/security.md#53-ospathjoin-discards-your-prefix), [#54](docs/security.md#54-tarfile-trusted-member-paths-until-python-314), [#72](docs/data-systems.md#72-urllibparseurljoin-drops-base-paths-and-resets-hosts) | 507 (path traversal, the #1 weakness) | `tarfile` CVE-2007-4559, open for 15 years |
 | Parsing cost grows with the attacker's input | [#56](docs/security.md#56-nested-quantifiers-backtrack-exponentially), [#57](docs/security.md#57-decompression-bombs), [#42](docs/interpreter.md#42-strint-fails-above-4300-digits) | 549 (denial of service) | `urllib3` CVE-2021-33503, `idna` CVE-2024-3651, CPython CVE-2020-10735 |
 | Loading data runs code | [#58](docs/security.md#58-loading-data-can-run-code) | 210 (deserialization) | `torch.load` CVE-2025-32434; 58 bypasses of `picklescan` |
 | A convenience hides a protocol decision | [#55](docs/security.md#55-redirects-forward-credentials-to-another-host) | 60 (redirect-related leaks) | `requests` CVE-2018-18074, `urllib3` CVE-2023-43804 |
@@ -40,6 +40,8 @@ Each row is a kind of hidden complexity, a pitfall that demonstrates the mechani
 | 1 | [Iterator exhaustion](#1-iterator-exhaustion-the-observer-effect) | Second `list(it)` is `[]` | Materialize once with `list()` |
 | 2 | [`zip()` drops data](#2-zip-silently-truncates-and-swallows-an-element) | Missing rows, a lost element | `zip(..., strict=True)` |
 | 3 | [Generators delay errors](#3-generators-delay-their-errors) | Exception far from the bug | Validate in a normal function |
+| 60 | [`all([])` is `True`](#60-all-is-true-vacuous-truth) | Empty list passes every check | Check non-empty + materialize |
+| 61 | [`itertools.groupby` splits unsorted runs](#61-itertoolsgroupby-only-groups-consecutive-runs-and-shares-its-iterator) | Duplicate keys, empty groups | Sort first + materialize groups |
 | | **Mutability & aliasing** | | |
 | 4 | [Mutable default arguments](#4-mutable-default-arguments) | Data bleeds across calls | `None` sentinel |
 | 5 | [List multiplication aliasing](#5-list-multiplication-aliasing) | Edit one row, all rows change | List comprehension |
@@ -57,6 +59,8 @@ Each row is a kind of hidden complexity, a pitfall that demonstrates the mechani
 | | **Syntax traps** | | |
 | 15 | [Implicit string concatenation](#15-implicit-string-concatenation) | Two items become one | Trailing commas + linter |
 | 16 | [Trailing comma makes a tuple](#16-a-trailing-comma-makes-a-tuple) | `(30,)` instead of `30` | Delete the comma |
+| 62 | [Chained comparisons (`in` + `==`)](#62-all-comparisons-chain-including-in-and-is) | `"a" in d == True` is `False` | Drop `== True` / parenthesize |
+| 63 | [`match`/`case` bare names capture](#63-bare-names-in-matchcase-capture-everything) | Constant check matches `500` | Use `Enum` dotted names |
 | | **Standard library surprises** | | |
 | 17 | [`strip()` takes a character set](#17-strip-takes-a-set-of-characters-not-a-substring) | `"report.txt"` becomes `"repor"` | `removesuffix()` |
 | 18 | [Banker's rounding](#18-round-uses-bankers-rounding) | `round(2.5) == 2` | `Decimal` + `ROUND_HALF_UP` |
@@ -66,13 +70,13 @@ Each row is a kind of hidden complexity, a pitfall that demonstrates the mechani
 
 | Page | # | Covers |
 |------|---|--------|
-| [Concurrency: asyncio & threading](docs/concurrency.md) | 20–30 | Garbage-collected tasks, forgotten `await`, blocking the event loop, swallowed cancellation, cross-thread loop calls, non-atomic `+=`, vanishing thread exceptions, `Lock` re-entry, `threading.local` under asyncio, `fork()` deadlocks, daemon threads |
-| [Object model & imports](docs/object-model.md) | 31–37 | Properties vs `__getattr__`, `@lru_cache` leaks, `__eq__` vs `__hash__`, `__exit__` swallowing errors, weak refs to bound methods, `mock.patch` targets, double-imported `__main__` |
-| [Interpreter internals](docs/interpreter.md) | 38–42 | `python -O` stripping asserts, class-body comprehension scope, `locals()` writes, `id()` reuse, the 4300-digit `int`/`str` limit |
-| [Data systems: time, numbers, bytes](docs/data-systems.md) | 43–52 | `hash()` sharding, NaN in containers, nanosecond timestamps in floats and `datetime`, float prices, DST arithmetic, fixed UTC offsets, `utcnow()`, `struct` alignment, non-standard JSON |
+| [Concurrency: asyncio, threading & subprocesses](docs/concurrency.md) | 20–30, 64–67 | Garbage-collected tasks, forgotten `await`, blocking the event loop, swallowed cancellation, cross-thread loop calls, `async for` cleanup leaks, `gather()` orphaned siblings, non-atomic `+=`, vanishing thread exceptions, `Lock` re-entry, `threading.local` under asyncio, `fork()` deadlocks, daemon threads, `Popen.wait()` pipe deadlocks, GIL `dict` assumptions |
+| [Object model & imports](docs/object-model.md) | 31–37, 68–70 | Properties vs `__getattr__`, `@lru_cache` leaks, `__eq__` vs `__hash__`, `__exit__` swallowing errors, weak refs to bound methods, `mock.patch` targets, double-imported `__main__`, built-in `dict` C fast-path bypasses, `__slots__` lost in subclasses, `__len__` falsiness |
+| [Interpreter internals](docs/interpreter.md) | 38–42, 71 | `python -O` stripping asserts, class-body comprehension scope, `locals()` writes, `id()` reuse, the 4300-digit `int`/`str` limit, deferred annotations vs runtime checks |
+| [Data systems: time, numbers, bytes & text](docs/data-systems.md) | 43–52, 72–73 | `hash()` sharding, NaN in containers, nanosecond timestamps in floats and `datetime`, float prices, DST arithmetic, fixed UTC offsets, `utcnow()`, `struct` alignment, non-standard JSON, `urljoin` path/origin traps, Unicode normalization & casefolding |
 | [Security: where complexity becomes a CVE](docs/security.md) | 53–59 | `os.path.join` with absolute paths, `tarfile` extraction, credentials forwarded on redirect, regex backtracking, decompression bombs, unsafe deserialization, signing-key confusion |
 
-See also [In the wild](#in-the-wild-home-assistant) for how a large production codebase hits and guards against these.
+See also [In the wild](#in-the-wild-home-assistant) and [Making it fail loudly](#making-it-fail-loudly-linter--runtime-guardrails) for how production codebases detect and prevent these automatically.
 
 ### Part III: Research
 
@@ -169,6 +173,41 @@ def _chunks(data, size):
 ```
 
 [Example](examples/03_lazy_generator_errors.py)
+
+### 60. `all([])` Is `True` (Vacuous Truth)
+
+`all()` checks that *no* element is falsy, so on an empty sequence it returns `True`. In validation or authorization logic, an empty list—or worse, an iterator that was already consumed earlier (see [#1](#1-iterator-exhaustion-the-observer-effect))—silently passes every check.
+
+```python
+# The Trap
+users = []
+if all(u["is_admin"] for u in users):
+    grant_admin_access()   # Runs when users is empty!
+```
+
+**Why:** Standard mathematical logic defines universal quantification over the empty set as true (`all(xs) == (not any(not x for x in xs))`).
+
+**The fix:** Materialize iterators once and explicitly require at least one element when emptiness is invalid: `bool(users) and all(u["is_admin"] for u in users)`.
+
+[Example](examples/60_all_empty_vacuous_truth.py)
+
+### 61. `itertools.groupby` Only Groups Consecutive Runs (and Shares Its Iterator)
+
+`itertools.groupby()` looks like SQL's `GROUP BY`, but it behaves like Unix `uniq`: it starts a new group whenever the key changes, without sorting. On top of that, every group shares one underlying iterator—if you save `(key, group)` tuples to inspect later, advancing to the next group drains the previous one, leaving earlier groups empty.
+
+```python
+# The Trap
+events = [("alice", 10), ("bob", 20), ("alice", 5)]
+print([k for k, _ in groupby(events, key=lambda r: r[0])])
+# Output: ['alice', 'bob', 'alice'] (two 'alice' groups!)
+
+saved = list(groupby(sorted(events), key=lambda r: r[0]))
+print(list(saved[0][1]))  # Output: [] (drained when groupby moved to 'bob')
+```
+
+**The fix:** Sort with the exact same key function first and materialize each group inside the comprehension (`[(k, list(g)) for k, g in groupby(sorted(data, key=fn), key=fn)]`), or group in a single O(n) pass without sorting using `collections.defaultdict(list)`.
+
+[Example](examples/61_groupby_unsorted_and_shared.py)
 
 ---
 
@@ -422,9 +461,9 @@ print({0, False})           # Output: {0}
 print(True + True)          # Output: 2
 ```
 
-Note the result keeps the *first* key (`1`) but the *last* value. This matters when you mix flags and counts in one mapping, `Counter`, or JSON-like structure.
+Note the result keeps the *first* key (`1`) but the *last* value. This matters when you mix flags and counts in one mapping, `Counter`, or JSON-like structure. It also bites runtime validation: `isinstance(True, int)` is `True`, so `isinstance(payload["limit"], int)` silently accepts JSON `{"limit": true}`.
 
-**The fix:** Don't mix `bool` and numeric keys. If the type genuinely matters, include it in the key: `(type(k), k)`.
+**The fix:** Don't mix `bool` and numeric keys; if the type genuinely matters, include it in the key: `(type(k), k)`. When validating integers at runtime, exclude booleans explicitly: `isinstance(x, int) and not isinstance(x, bool)`.
 
 [Example](examples/14_bool_is_int.py)
 
@@ -466,6 +505,42 @@ Meanwhile `(30)` is just `30`. You need `(30,)` for a one-element tuple.
 **The fix:** Delete the comma. Ruff's `COM818` (trailing comma on bare tuple) catches this automatically.
 
 [Example](examples/16_trailing_comma_tuple.py)
+
+### 62. All Comparisons Chain (Including `in` and `is`)
+
+`0 < x < 10` is one of Python's nicest features, because Python expands `a op1 b op2 c` into `(a op1 b) and (b op2 c)`. Less obviously, `in`, `not in`, `is`, `is not` and `==` are *all* in the same comparison precedence group, so they chain with each other too.
+
+```python
+# The Trap
+d = {"a": 1}
+print("a" in d == True)          # Output: False (("a" in d) and (d == True))
+print(False == False in [False]) # Output: True  ((False == False) and (False in [False]))
+```
+
+**The fix:** Never compare boolean expressions with `== True` or `is True`—write `if "a" in d:` directly (Ruff's `E712` flags equality comparisons to `True`/`False`). When you genuinely need to compare the result of a comparison, add parentheses: `("a" in d) == expected`.
+
+[Example](examples/62_chained_comparison_trap.py)
+
+### 63. Bare Names in `match`/`case` Capture Everything
+
+In a `match` statement, a bare identifier like `HTTP_OK` does **not** compare against the variable `HTTP_OK`. It acts as an unconditional capture pattern that matches *any* value and overwrites `HTTP_OK` in the local scope. Inside a tuple or mapping pattern it doesn't even trigger an unreachable-branch `SyntaxError`.
+
+```python
+# The Trap
+HTTP_OK = 200
+
+match (500, "database down"):
+    case (HTTP_OK, body):        # Matches 500 and rebinds HTTP_OK = 500!
+        print(f"ok: {body}")     # Output: ok: database down
+    case _:
+        print("error")
+```
+
+**Why:** Structural pattern matching ([PEP 634](https://peps.python.org/pep-0634/)) treats bare names like assignment targets (`x = ...`) and reserves value lookup for dotted names (`Status.OK`).
+
+**The fix:** Put constants on an `Enum` (or module namespace) so the pattern uses a dotted name (`case (Status.OK, body):`), or add an explicit guard (`case (code, body) if code == HTTP_OK:`).
+
+[Example](examples/63_match_case_bare_name.py)
 
 ---
 
@@ -545,6 +620,39 @@ print(save()) # Output: saved
 - **Linting.** The project [enabled 19 more flake8-bugbear rules](https://github.com/home-assistant/core/pull/170494) through ruff, covering mutable defaults, loop-variable shadowing and similar traps.
 
 The lesson generalizes: when a pitfall can't be designed away, make it fail loudly. Every guard rail above turns a silent, intermittent bug into an immediate error with a clear message.
+
+## Making it fail loudly: linter & runtime guardrails
+
+Many of the pitfalls in this catalog can be caught statically in CI before code ever runs. Adding the rules below to `pyproject.toml` flags them automatically with [Ruff](https://docs.astral.sh/ruff/):
+
+```toml
+[tool.ruff.lint]
+extend-select = [
+    "B005",     # #17: .strip() with multi-character strings
+    "B006",     # #4:  mutable default arguments
+    "B007",     # #10: unused loop control variables (shadowing risk)
+    "B012",     # #19: return/break/continue inside finally
+    "B019",     # #32: @lru_cache on methods (instance memory leak)
+    "B020",     # #10: loop variable overrides iterable
+    "B023",     # #9:  function/lambda in loop doesn't bind loop variable
+    "B905",     # #2:  zip() without explicit strict=
+    "COM818",   # #16: trailing comma creating an accidental bare tuple
+    "DTZ",      # #48–50: naive datetimes and datetime.utcnow()
+    "E712",     # #62: == True / == False (triggers chained-comparison traps)
+    "ISC001",   # #15: implicit string concatenation
+    "RUF006",   # #20: asyncio.create_task() without storing a reference
+    "S101",     # #38: assert used for runtime validation
+    "S301",     # #58: suspicious pickle usage
+    "S324",     # #43: insecure/non-cryptographic hash usage
+    "ASYNC",    # #22: blocking I/O and time.sleep() inside async functions
+    "TC",       # #71: imports behind TYPE_CHECKING needed at runtime
+]
+```
+
+Pair static linting with:
+
+- **Type checking (`pyright` / `mypy`):** catches unawaited coroutines ([#21](docs/concurrency.md#21-forgetting-await-silently-does-nothing)), unreachable `match` branches ([#63](#63-bare-names-in-matchcase-capture-everything)), and missing `None` checks ([#70](docs/object-model.md#70-defining-__len__-makes-empty-objects-falsy)).
+- **Development mode (`python -X dev`) in tests:** enables asyncio debug checks for slow callbacks ([#22](docs/concurrency.md#22-blocking-calls-freeze-the-event-loop)), non-thread-safe loop calls ([#24](docs/concurrency.md#24-loop-methods-arent-thread-safe)), and `ResourceWarning` on unclosed pipes and files ([#66](docs/concurrency.md#66-subprocesspopenwait-deadlocks-when-a-pipe-fills)).
 
 ## Running the examples
 

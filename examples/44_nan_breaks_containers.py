@@ -19,7 +19,13 @@ result = sorted([3, nan, 1, 2])
 print(result)  # [3, nan, 1, 2]
 assert [x for x in result if not math.isnan(x)] != [1, 2, 3]
 
-# The fix: remove or replace NaNs before aggregating or sorting.
+# Sets and dicts accept every distinct NaN object as a separate, un-findable key.
+nan_set = {float("nan") for _ in range(5)}
+print(len(nan_set), float("nan") in nan_set)  # 5 False
+assert len(nan_set) == 5
+assert float("nan") not in nan_set
+
+# The fix: remove or replace NaNs before aggregating, sorting or keying containers.
 clean = [x for x in [3, nan, 1, 2] if not math.isnan(x)]
 assert sorted(clean) == [1, 2, 3]
 assert max(clean) == 3

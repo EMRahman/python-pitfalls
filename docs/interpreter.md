@@ -13,6 +13,7 @@ Some Python behavior only makes sense once you know what the compiler and CPytho
 | 40 | [Writing to `locals()`](#40-writing-to-locals-does-nothing) | Assignment ignored | Use an explicit dict |
 | 41 | [`id()` values get reused](#41-id-values-get-reused) | Stale cache hits | Key on the value |
 | 42 | [4300-digit `int`/`str` limit](#42-strint-fails-above-4300-digits) | `ValueError` on big numbers | `sys.set_int_max_str_digits()` |
+| 71 | [Deferred annotations vs runtime checks](#71-deferred-annotations-break-naive-runtime-introspection) | `__annotations__` holds strings, not types | `typing.get_type_hints()` |
 
 ---
 
@@ -113,3 +114,24 @@ json.loads("9" * 5000)    # ValueError too.
 **The fix:** Use `sys.set_int_max_str_digits(n)` (or `PYTHONINTMAXSTRDIGITS`), ideally only around code that handles trusted input. Hex, octal and binary conversions are unaffected.
 
 [Example](../examples/42_int_str_digit_limit.py)
+
+### 71. Deferred Annotations Break Naive Runtime Introspection
+
+Adding `from __future__ import annotations` ([PEP 563](https://peps.python.org/pep-0563/)) stops Python from evaluating type hints at definition time and stores their source text as strings instead. Any decorator, CLI builder or validator that reads `fn.__annotations__` expecting real classes breaks at runtime, and `typing.get_type_hints()` fails with `NameError` if an annotation references a class defined inside a function.
+
+```python
+# The Trap
+from __future__ import annotations
+
+def parse_port(port: int) -> int:
+    return port
+
+parse_port.__annotations__["port"]              # 'int' (a str, not <class 'int'>)
+isinstance(8080, parse_port.__annotations__["port"])  # TypeError!
+```
+
+**Why:** Static type checkers wanted forward references without runtime import cost, while runtime frameworks (FastAPI, Pydantic, `dataclasses`, dependency injectors) treat annotations as executable metadata. Python 3.14 introduced lazy annotation functions via `annotationlib` ([PEP 649](https://peps.python.org/pep-0649/)) to replace stringification when `__future__` is *not* imported, meaning libraries now encounter eager types, PEP 563 strings, and PEP 649 evaluators side by side.
+
+**The fix:** Never read `__annotations__` directly for types; call `typing.get_type_hints(fn)` (or `annotationlib.get_annotations()` on 3.14+), and keep runtime-inspected types at module scope where `get_type_hints()` can resolve them (Ruff's `TC001`–`TC003` flag imports moved behind `if TYPE_CHECKING:` that runtime consumers still need).
+
+[Example](../examples/71_stringified_annotations.py)
