@@ -47,3 +47,15 @@ hints = typing.get_type_hints(parse_port)
 assert hints["port"] is int
 assert isinstance(8080, hints["port"])
 assert typing.get_type_hints(handler, localns={"LocalRequest": local_cls})["req"] is local_cls
+
+# Python 3.14+ alternative: annotationlib leaves PEP 563 strings unchanged unless
+# eval_str=True is passed. Check both the default and the resolved annotation.
+try:
+    import annotationlib
+except ImportError:  # Python 3.10–3.13
+    pass
+else:
+    assert annotationlib.get_annotations(parse_port)["port"] == "int"
+    resolved = annotationlib.get_annotations(parse_port, eval_str=True)
+    assert resolved["port"] is int
+    assert isinstance(8080, resolved["port"])

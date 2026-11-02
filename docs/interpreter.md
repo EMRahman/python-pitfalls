@@ -132,6 +132,8 @@ isinstance(8080, parse_port.__annotations__["port"])  # TypeError!
 
 **Why:** Static type checkers wanted forward references without runtime import cost, while runtime frameworks (FastAPI, Pydantic, `dataclasses`, dependency injectors) treat annotations as executable metadata. Python 3.14 introduced lazy annotation functions via `annotationlib` ([PEP 649](https://peps.python.org/pep-0649/)) to replace stringification when `__future__` is *not* imported, meaning libraries now encounter eager types, PEP 563 strings, and PEP 649 evaluators side by side.
 
-**The fix:** Never read `__annotations__` directly for types; call `typing.get_type_hints(fn)` (or `annotationlib.get_annotations()` on 3.14+), and keep runtime-inspected types at module scope where `get_type_hints()` can resolve them (Ruff's `TC001`–`TC003` flag imports moved behind `if TYPE_CHECKING:` that runtime consumers still need).
+**The fix:** Never read `__annotations__` directly for types; call `typing.get_type_hints(fn)` (or `annotationlib.get_annotations(fn, eval_str=True)` on 3.14+), and keep runtime-inspected types at module scope where `get_type_hints()` can resolve them (Ruff's `TC001`–`TC003` flag imports moved behind `if TYPE_CHECKING:` that runtime consumers still need).
+
+With the future import above, `annotationlib.get_annotations(fn)` leaves strings unchanged by default (`eval_str=False`). Pass `eval_str=True` to resolve `"int"` to `int` ([API reference](https://docs.python.org/3.14/library/annotationlib.html#annotationlib.get_annotations)).
 
 [Example](../examples/71_stringified_annotations.py)
