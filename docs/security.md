@@ -10,7 +10,7 @@ Counts are unique PyPI advisories published since 2023, from the [OSV](https://o
 
 | # | Pitfall | Weakness (CWE) | PyPI advisories since 2023 | The fix |
 |---|---------|----------------|---------------------------:|---------|
-| 53 | [`os.path.join` discards your prefix](#53-ospathjoin-discards-your-prefix) | Path traversal (22) | 444, the most common weakness on PyPI | Resolve, then check containment |
+| 53 | [`os.path.join` discards your prefix](#53-ospathjoin-discards-your-prefix) | Path traversal (22) | 444 (507 incl. variants) | Resolve, then check containment |
 | 54 | [`tarfile` trusted member paths](#54-tarfile-trusted-member-paths-until-python-314) | Path traversal (22) | (CVE-2007-4559, in CPython) | `filter="data"` |
 | 55 | [Redirects forward credentials](#55-redirects-forward-credentials-to-another-host) | Information exposure (200) | 60 redirect-related | Strip headers across origins |
 | 56 | [Regex backtracking](#56-nested-quantifiers-backtrack-exponentially) | ReDoS (1333) | 80 | Remove nested quantifiers |
@@ -18,7 +18,7 @@ Counts are unique PyPI advisories published since 2023, from the [OSV](https://o
 | 58 | [Loading data runs code](#58-loading-data-can-run-code) | Deserialization (502) | 210 | Use data-only formats |
 | 59 | [One key parameter, two meanings](#59-one-key-parameter-two-meanings) | Signature verification (347) | 41 | Pin the algorithm |
 
-Entries 53–57 have runnable examples. Entries 58 and 59 are documented without examples, because demonstrating them means writing a working attack.
+Every entry has a runnable example (`#58` and `#59` demonstrate the mechanism with benign stdlib callables and local HMAC checks rather than exploit payloads).
 
 ---
 
@@ -48,7 +48,7 @@ def safe_join(base, name):
     return target
 ```
 
-`.resolve()` also follows symlinks, so a link planted inside the directory can't point outside it. Better still, don't use client-supplied names as paths at all: generate the filename yourself and store the original as metadata.
+`.resolve()` also follows symlinks, so a link planted inside the directory can't point outside it. Note that if a local attacker has write access to the directory while your process runs, they can swap a file for a symlink *between* `safe_join()` and `open()`—the check-then-use race behind [`filelock`'s 20 advisories](dependency-risk.md#4-one-parameter-two-meanings); defend shared local directories with `os.open(..., os.O_NOFOLLOW, dir_fd=...)`. Better still, don't use client-supplied names as paths at all: generate the filename yourself and store the original as metadata. (For the URL equivalent of this trap, see [#72 `urllib.parse.urljoin`](data-systems.md#72-urllibparseurljoin-drops-base-paths-and-resets-hosts).)
 
 **In the wild:** Path traversal (CWE-22 and its variants) is the most common weakness in PyPI advisories, with 507 since 2023. It shows up in file servers, archive extraction, model and plugin loaders, and anything that turns a request parameter into a path.
 
@@ -148,7 +148,7 @@ zlib.decompress(bomb)                          # 50,000,000 bytes in memory
 
 **In the wild:** Deserialization of untrusted data (CWE-502) accounts for 210 PyPI advisories since 2023, concentrated in machine-learning tools that load models from the internet. [PyTorch 2.6 changed `torch.load`](https://dev-discuss.pytorch.org/t/bc-breaking-change-torch-load-is-being-flipped-to-use-weights-only-true-by-default-in-the-nightlies-after-137602/2573) to `weights_only=True` by default, and CVE-2025-32434 then showed that even that restricted mode could be bypassed in earlier versions. `picklescan`, a tool built to detect malicious pickles, has had 58 advisories of its own, most of them ways to get a malicious file past it undetected.
 
-*No runnable example: demonstrating this means writing a working payload.*
+[Example](../examples/58_pickle_deserialization_exec.py)
 
 ### 59. One Key Parameter, Two Meanings
 
@@ -168,4 +168,4 @@ jwt.decode(token, public_key_pem, algorithms=["RS256"])
 
 **In the wild:** PyJWT has had 23 advisories since 2023, and 15 of them involve keys or algorithms: public keys in DER form, JWK containers or whitespace-mutated PEM accepted as HMAC secrets, and empty HMAC keys accepted. That's 41 signature-verification advisories (CWE-347) across PyPI.
 
-*No runnable example: demonstrating this means forging a token.*
+[Example](../examples/59_key_algorithm_confusion.py)

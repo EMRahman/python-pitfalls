@@ -14,13 +14,17 @@ Concurrency bugs are the purest form of *unknown unknowns*. The code reads top t
 | 22 | [Blocking calls freeze the loop](#22-blocking-calls-freeze-the-event-loop) | Every task stalls at once | `asyncio.to_thread()` |
 | 23 | [Catching `BaseException`](#23-catching-baseexception-breaks-cancellation) | `cancel()` and timeouts do nothing | Catch `Exception` |
 | 24 | [Loop methods aren't thread-safe](#24-loop-methods-arent-thread-safe) | Callbacks run late, or never | `call_soon_threadsafe()` |
-| | **Threading** | | |
+| 64 | [Breaking out of `async for`](#64-breaking-out-of-async-for-delays-cleanup) | Connections stay open after `break` | `contextlib.aclosing()` |
+| 65 | [`asyncio.gather()` orphans siblings](#65-asynciogather-leaves-sibling-tasks-running-on-error) | Failed call still mutates state | `asyncio.TaskGroup` |
+| | **Threading & Subprocesses** | | |
 | 25 | [`+=` is not atomic](#25--is-not-atomic) | Lost updates | `threading.Lock` |
 | 26 | [Exceptions in threads vanish](#26-exceptions-in-threads-vanish) | Failures with no traceback | Call `future.result()` |
 | 27 | [`Lock` is not reentrant](#27-lock-is-not-reentrant) | Thread deadlocks on itself | `threading.RLock` |
 | 28 | [`threading.local` in asyncio](#28-threadinglocal-leaks-between-asyncio-tasks) | One request sees another's data | `contextvars` |
 | 29 | [`fork()` with threads running](#29-fork-copies-locked-locks) | Child process hangs forever | `spawn` / `forkserver` |
 | 30 | [Daemon threads skip cleanup](#30-daemon-threads-skip-cleanup) | Unflushed data at exit | Stop event + `join()` |
+| 66 | [`Popen.wait()` with `PIPE`](#66-subprocesspopenwait-deadlocks-when-a-pipe-fills) | Process hangs past ~64 KB output | `subprocess.run()` / `communicate()` |
+| 67 | ["The GIL makes `dict` safe"](#67-the-gil-makes-dict-safe-fails-on-compound-operations) | Duplicate work, `RuntimeError` | Lock compound access |
 
 ---
 
@@ -135,9 +139,57 @@ In the example, the callback is delayed from 100 ms to 500 ms. With `loop.set_de
 
 [Example](../examples/24_asyncio_cross_thread_calls.py)
 
+### 64. Breaking Out of `async for` Delays Cleanup
+
+In CPython, breaking out of a synchronous generator loop drops its reference count to zero and runs its `finally` block right away. An async generator's `finally` may `await`, which synchronous `break` and garbage collection cannot do immediately. Breaking early out of `async for` leaves connections, locks or transactions inside the generator open until the loop shuts down (or a later GC pass schedules cleanup).
+
+```python
+# The Trap
+async def stream_rows(db):
+    conn = await db.acquire()
+    try:
+        async for row in conn.cursor():
+            yield row
+    finally:
+        await conn.release()   # Not run when the caller breaks!
+
+async for row in stream_rows(db):
+    if row.id == target:
+        break                  # conn stays checked out of the pool.
+```
+
+**The fix:** Wrap any async generator you might exit early in `contextlib.aclosing()` (Python 3.10+), which awaits `agen.aclose()` on block exit:
+
+```python
+async with contextlib.aclosing(stream_rows(db)) as rows:
+    async for row in rows:
+        if row.id == target:
+            break
+```
+
+[Example](../examples/64_async_generator_cleanup.py)
+
+### 65. `asyncio.gather()` Leaves Sibling Tasks Running on Error
+
+`await asyncio.gather(validate(), charge_card())` looks like a single unit of work. Yet when `validate()` raises, `gather()` immediately propagates the exception to the caller *without cancelling* `charge_card()`. The sibling task keeps running in the background and can commit writes after your error handler has already returned a failure response.
+
+```python
+# The Trap
+try:
+    await asyncio.gather(validate(), charge_card())
+except ValueError:
+    return "order rejected"   # charge_card() is still running in the background!
+```
+
+**Why:** `gather()` waits on futures rather than owning task lifetimes, so raising early merely detaches the caller from the remaining tasks.
+
+**The fix:** Use `asyncio.TaskGroup` (Python 3.11+), which cancels every remaining task and awaits their termination before exiting the `async with` block.
+
+[Example](../examples/65_asyncio_gather_orphans.py)
+
 ---
 
-## Threading
+## Threading & Subprocesses
 
 ### 25. `+=` Is Not Atomic
 
@@ -257,3 +309,34 @@ t.join()
 ```
 
 [Example](../examples/30_daemon_threads_skip_cleanup.py)
+
+### 66. `subprocess.Popen.wait()` Deadlocks When a Pipe Fills
+
+`Popen(..., stdout=subprocess.PIPE)` redirects the child's output into an OS kernel buffer (typically 64 KB on Linux and macOS). Calling `proc.wait()` waits for the child to exit *without draining that pipe*. Small outputs fit in the buffer so every unit test passes; in production, a verbose response fills the pipe, the child blocks on `write()`, and the parent blocks on `wait()` forever.
+
+```python
+# The Trap
+proc = subprocess.Popen(cmd, stdout=subprocess.PIPE)
+proc.wait()               # Hangs once stdout exceeds ~64 KB.
+out = proc.stdout.read()
+```
+
+**The fix:** Use `subprocess.run(cmd, capture_output=True)` (or `out, err = proc.communicate()`), which drains `stdout` and `stderr` concurrently while waiting for exit. If you don't need the output, redirect to `subprocess.DEVNULL` instead of `PIPE`.
+
+[Example](../examples/66_subprocess_pipe_deadlock.py)
+
+### 67. "The GIL Makes `dict` Safe" Fails on Compound Operations
+
+Because individual C-level `dict` lookups and stores happen while holding the GIL, Python lore often treats `dict` as "thread-safe without a lock". That abstraction leaks in three ways: check-then-set (`if k not in cache: cache[k] = ...`) races between the check and the store; mutating a `dict` while another thread iterates it raises `RuntimeError: dictionary changed size during iteration` even with the GIL on; and under free-threaded builds (`python3.13t` / `python3.14t`), the GIL is gone altogether.
+
+```python
+# The Trap
+def get_user(uid):
+    if uid not in cache:          # Thread B checks before Thread A stores...
+        cache[uid] = fetch(uid)   # ...both run fetch(uid).
+    return cache[uid]
+```
+
+**The fix:** Protect compound read-modify-write sequences and iteration snapshots (`list(shared.items())`) with a `threading.Lock`, regardless of whether the GIL is enabled.
+
+[Example](../examples/67_freethreaded_gil_assumptions.py)

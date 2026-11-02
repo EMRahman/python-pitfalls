@@ -18,9 +18,11 @@ These are the pitfalls that matter when Python moves real data: market feeds, se
 | 48 | [Aware datetime arithmetic is wall-clock](#48-aware-datetime-arithmetic-is-wall-clock-arithmetic) | Jobs fire an hour off, or in a loop | Do arithmetic in UTC |
 | 49 | [A UTC offset is not a time zone](#49-a-utc-offset-is-not-a-time-zone) | Schedule drifts after DST | Convert to a `ZoneInfo` |
 | 50 | [`datetime.utcnow()`](#50-datetimeutcnow-is-off-by-your-utc-offset) | Timestamps off by hours | `datetime.now(timezone.utc)` |
-| | **Wire formats** | | |
+| | **Wire formats & text** | | |
 | 51 | [`struct` pads and byte-swaps](#51-struct-pads-and-byte-swaps-by-default) | Garbage fields, wrong sizes | Always use `<`, `>` or `!` |
 | 52 | [`json.dumps` emits invalid JSON](#52-jsondumps-emits-invalid-json) | Other languages reject the payload | `allow_nan=False` |
+| 72 | [`urljoin` drops paths and hosts](#72-urllibparseurljoin-drops-base-paths-and-resets-hosts) | `/v1` vanishes, `//host` swaps origin | Normalize `/` + verify origin |
+| 73 | [Unicode normalization & casing](#73-visually-identical-unicode-strings-arent-equal) | `"café" != "café"`, `"ß"` mismatches | `normalize("NFC")` + `.casefold()` |
 
 ---
 
@@ -57,9 +59,12 @@ float("nan") in [nan]       # False (a different NaN object)
 max([nan, 1, 2])            # nan
 max([1, nan, 2])            # 2   (depends on position!)
 sorted([3, nan, 1, 2])      # [3, nan, 1, 2]   (not sorted)
+
+s = {float("nan") for _ in range(5)}
+len(s), float("nan") in s   # (5, False): 5 ghost entries you can never look up
 ```
 
-**Why:** Sorting and `max()` assume that if `a < b` is false then `a >= b`. Every comparison with NaN is false, so that assumption breaks and the result depends on the order in which elements were compared.
+**Why:** Sorting and `max()` assume that if `a < b` is false then `a >= b`. Every comparison with NaN is false, so that assumption breaks and the result depends on the order in which elements were compared. Meanwhile `float("nan")` is still hashable, so sets and dicts accept every distinct NaN object as a separate key that never compares equal on lookup.
 
 **The fix:** Remove or replace NaNs before aggregating: `[x for x in xs if not math.isnan(x)]`. Market data formats often use a sentinel for a missing price; Databento's [DBN](https://docs.rs/dbn) uses `i64::MAX` (`UNDEF_PRICE`), which its float conversion helpers turn into NaN. Handle that case at the boundary, before it reaches your analytics.
 
@@ -176,7 +181,7 @@ datetime.utcnow().timestamp() - time.time()   # +14,400 or +18,000 s (4 or 5 hou
 
 ---
 
-## Wire formats
+## Wire formats & text
 
 ### 51. `struct` Pads and Byte-Swaps by Default
 
@@ -208,3 +213,34 @@ A related trap: Python serializes huge integers exactly, but JavaScript reads JS
 **The fix:** Pass `allow_nan=False` to fail fast, and convert missing values to `None` (`null`) yourself. Send large integers such as nanosecond timestamps as strings when the consumer might be JavaScript.
 
 [Example](../examples/52_json_nan_infinity.py)
+
+### 72. `urllib.parse.urljoin` Drops Base Paths and Resets Hosts
+
+Developers reach for `urljoin(base_url, endpoint)` expecting path concatenation like `f"{base}/{endpoint}"`. Instead, `urljoin` implements RFC 3986 relative-reference resolution (how browsers resolve `<a href="...">`). Three surprises follow: a base URL without a trailing `/` loses its last path segment; a leading `/` in `endpoint` wipes out the entire base path; and a scheme-relative `//host` replaces the origin altogether (turning a URL builder into an SSRF or credential-leak primitive; see [#53](security.md#53-ospathjoin-discards-your-prefix) and [#55](security.md#55-redirects-forward-credentials-to-another-host)).
+
+```python
+# The Trap
+urljoin("https://api.example.com/v1", "users")            # 'https://api.example.com/users' (/v1 gone!)
+urljoin("https://api.example.com/v1/", "/users")          # 'https://api.example.com/users'
+urljoin("https://api.example.com/v1/", "//evil.test/x")   # 'https://evil.test/x'
+```
+
+**The fix:** Reject endpoints that carry their own scheme or host (`urlsplit(endpoint).netloc`), ensure the base ends with `/`, strip a single leading slash with `endpoint.removeprefix("/")`, and verify the joined URL's origin and path prefix still match the base.
+
+[Example](../examples/72_urljoin_drops_path.py)
+
+### 73. Visually Identical Unicode Strings Aren't Equal
+
+Python `str` is a sequence of Unicode code points, not user-perceived characters. `"café"` can be encoded as four code points (`"caf\u00e9"`, NFC) or five (`"cafe\u0301"`, NFD, standard for macOS filenames). They render identically, yet `==` is `False`, `len()` differs, and a `dict` or database lookup misses. Casing has a matching trap: `"ß".lower()` stays `"ß"`, while `"STRASSE".lower()` is `"strasse"`, so `.lower()` fails to match them.
+
+```python
+# The Trap
+nfc, nfd = "caf\u00e9", "cafe\u0301"
+print(nfc, nfd, nfc == nfd)              # café café False
+print(len({nfc, nfd}))                   # 2 separate set entries
+print("straße".lower() == "STRASSE".lower())  # False
+```
+
+**The fix:** Normalize untrusted text at system boundaries with `unicodedata.normalize("NFC", text)`, and use `.casefold()` rather than `.lower()` for case-insensitive matching and deduplication.
+
+[Example](../examples/73_unicode_normalization_casing.py)
