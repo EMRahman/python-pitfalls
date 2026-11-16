@@ -42,6 +42,7 @@ Each row is a kind of hidden complexity, a pitfall that demonstrates the mechani
 | 3 | [Generators delay errors](#3-generators-delay-their-errors) | Exception far from the bug | Validate in a normal function |
 | 60 | [`all([])` is `True`](#60-all-is-true-vacuous-truth) | Empty list passes every check | Check non-empty + materialize |
 | 61 | [`itertools.groupby` splits unsorted runs](#61-itertoolsgroupby-only-groups-consecutive-runs-and-shares-its-iterator) | Duplicate keys, empty groups | Sort first + materialize groups |
+| 74 | [`defaultdict` creates keys on read](#74-defaultdict-creates-keys-on-read) | Typos become plausible zero values | Use `.get()` / validate keys |
 | | **Mutability & aliasing** | | |
 | 4 | [Mutable default arguments](#4-mutable-default-arguments) | Data bleeds across calls | `None` sentinel |
 | 5 | [List multiplication aliasing](#5-list-multiplication-aliasing) | Edit one row, all rows change | List comprehension |
@@ -208,6 +209,32 @@ print(list(saved[0][1]))  # Output: [] (drained when groupby moved to 'bob')
 **The fix:** Sort with the exact same key function first and materialize each group inside the comprehension (`[(k, list(g)) for k, g in groupby(sorted(data, key=fn), key=fn)]`), or group in a single O(n) pass without sorting using `collections.defaultdict(list)`.
 
 [Example](examples/61_groupby_unsorted_and_shared.py)
+
+---
+
+### 74. `defaultdict` Creates Keys on Read
+
+`defaultdict` is excellent for deliberate aggregation: `defaultdict(int)` lets a counter start at zero and `defaultdict(list)` lets a group start as an empty list. But accessing a missing key calls its factory and inserts that key. A misspelt service name can therefore look like a healthy service with zero errors instead of raising `KeyError`.
+
+```python
+from collections import defaultdict
+
+errors = defaultdict(int, api=12)
+
+service = "apii"  # typo
+if errors[service] == 0:
+    print("No errors — service is healthy")
+
+print(dict(errors))
+# No errors — service is healthy
+# {'api': 12, 'apii': 0}  (the typo was inserted)
+```
+
+**Why:** `defaultdict.__getitem__` handles a missing key by calling `default_factory()`, storing the result, and returning it. This is helpful during known aggregation, but changes a read into a write.
+
+**The fix:** Use a normal `dict` when absence is an error. If you are using a `defaultdict` but only want to inspect a possible key, use `.get(key, default)` or `if key in mapping:`; neither inserts the key. Validate an externally supplied service name against your registered services before treating its count as meaningful.
+
+[Example](examples/74_defaultdict_missing_key.py)
 
 ---
 
